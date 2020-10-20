@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" autoUpload="Always" serverName="xiaoxi.xjl@11.167.226.208:22 (1)">
+    <serverData>
+      <paths name="xiaoxi.xjl@11.167.226.208:22">
+        <serverdata>
+          <mappings>
+            <mapping deploy="" local="" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="xiaoxi.xjl@11.167.226.208:22 (1)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/xiaoxi.xjl/others_code/cskd" local="$PROJECT_DIR$" />
+            <mapping deploy="/home/xiaoxi.xjl/others_code/cskd" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+    </serverData>
+    <option name="myAutoUpload" value="ALWAYS" />
+  </component>
+</project>

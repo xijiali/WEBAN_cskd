@@ -29,9 +29,9 @@ def main():
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('--model', default="CIFAR_ResNet18", type=str,
                         help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='4', type=str, help='name of run')
+    parser.add_argument('--name', default='pretrain200', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
-    parser.add_argument('--epoch', default=30, type=int, help='total epochs to run')
+    parser.add_argument('--epoch', default=200, type=int, help='total epochs to run')
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
     parser.add_argument('--ngpu', default=2, type=int, help='number of gpu')
     parser.add_argument('--sgpu', default=0, type=int, help='gpu index (start)')
@@ -46,6 +46,8 @@ def main():
     parser.add_argument("--n_gen", type=int, default=5)
     parser.add_argument("--resume_gen", type=int, default=0)
     parser.add_argument('--alpha', default=0.8, type=float, help='ce loss weight ratio')
+    parser.add_argument('--evaluate', default=False, help='evaluate ensembling checkpoints')
+    parser.add_argument('--testdir', default='./AWEBAN_results', type=str, help='save directory')
 
 
 
@@ -91,17 +93,40 @@ def main():
     logger = logging.getLogger('main')
     logname = os.path.join(logdir, 'log.csv')
 
-    # Resume
-    if args.resume:
+    # Evaluate
+    if args.evaluate:
+        testdir = os.path.join(args.testdir, args.dataset, args.model, args.name)
         # Load checkpoint.
-        print('==> Resuming from checkpoint..')
-        checkpoint = torch.load(os.path.join(logdir, 'ckpt.t7'))
-        net.load_state_dict(checkpoint['net'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        best_acc = checkpoint['acc']
-        start_epoch = checkpoint['epoch'] + 1
-        rng_state = checkpoint['rng_state']
-        torch.set_rng_state(rng_state)
+        print('==> Evaluating ensembling checkpoints..')
+        model_lst = []
+        for i in range(args.n_gen):
+            temp_model = models.load_model(args.model, num_class).cuda()
+            temp_model.eval()
+            temp_model= torch.nn.DataParallel(temp_model, device_ids=device_ids)
+            model_name = 'model' + str(i) + '.pth.tar'
+            checkpoint = torch.load(os.path.join(testdir, model_name))
+            temp_model.load_state_dict(checkpoint)
+            model_lst.append(temp_model)
+        # optimizer.load_state_dict(checkpoint['optimizer'])
+        # best_acc = checkpoint['acc']
+        # start_epoch = checkpoint['epoch'] + 1
+        # rng_state = checkpoint['rng_state']
+        # torch.set_rng_state(rng_state)
+        correct = 0.0
+        total = 0.0
+        with torch.no_grad():
+            for batch_idx, (inputs, targets) in enumerate(valloader):
+                inputs, targets = inputs.cuda(), targets.cuda()
+                outputs = torch.zeros(inputs.size(0), num_class).cuda()
+                for j in range(args.n_gen):
+                    outputs += model_lst[j](inputs)
+                outputs = outputs / args.n_gen
+                _, predicted = torch.max(outputs, 1)
+                total += targets.size(0)
+                correct += predicted.eq(targets.data).cpu().sum().float()
+        acc = 100. * correct / total
+        print('acc is {}'.format(acc))
+        return
 
 
     criterion = nn.CrossEntropyLoss()

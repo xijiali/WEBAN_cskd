@@ -1,9 +1,10 @@
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 import torch.nn.functional as F
+import torch.nn.init as init
 
 __all__ = ['ResNet', 'resnet10', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
-           'resnet152', 'resnext50_32x4d', 'resnext101_32x8d', 'CIFAR_ResNet', 'CIFAR_ResNet18', 'CIFAR_ResNet34', 'CIFAR_ResNet10']
+           'resnet152', 'resnext50_32x4d', 'resnext101_32x8d', 'CIFAR_ResNet', 'CIFAR_ResNet18', 'CIFAR_ResNet34', 'CIFAR_ResNet10','resnet32']
 
 
 model_urls = {
@@ -14,6 +15,51 @@ model_urls = {
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
 
+def _weights_init(m):
+    classname = m.__class__.__name__
+    #print(classname)
+    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
+        init.kaiming_normal_(m.weight)
+
+class LambdaLayer(nn.Module):
+    def __init__(self, lambd):
+        super(LambdaLayer, self).__init__()
+        self.lambd = lambd
+
+    def forward(self, x):
+        return self.lambd(x)
+
+
+class BasicBlock_v2(nn.Module):
+    expansion = 1
+
+    def __init__(self, in_planes, planes, stride=1, option='A'):
+        super(BasicBlock_v2, self).__init__()
+        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(planes)
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(planes)
+
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_planes != planes:
+            if option == 'A':
+                """
+                For CIFAR10 ResNet paper uses option A.
+                """
+                self.shortcut = LambdaLayer(lambda x:
+                                            F.pad(x[:, :, ::2, ::2], (0, 0, 0, 0, planes//4, planes//4), "constant", 0))
+            elif option == 'B':
+                self.shortcut = nn.Sequential(
+                     nn.Conv2d(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False),
+                     nn.BatchNorm2d(self.expansion * planes)
+                )
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        out = F.relu(out)
+        return out
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1):
     """3x3 convolution with padding"""
@@ -207,6 +253,40 @@ class ResNet(nn.Module):
 
         return x
 
+class ResNet_v2(nn.Module):
+    def __init__(self, block, num_blocks, num_classes=10):
+        super(ResNet_v2, self).__init__()
+        self.in_planes = 16
+
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.layer1 = self._make_layer(block, 16, num_blocks[0], stride=1)
+        self.layer2 = self._make_layer(block, 32, num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(block, 64, num_blocks[2], stride=2)
+        self.linear = nn.Linear(64, num_classes)
+
+        self.apply(_weights_init)
+
+    def _make_layer(self, block, planes, num_blocks, stride):
+        strides = [stride] + [1]*(num_blocks-1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_planes, planes, stride))
+            self.in_planes = planes * block.expansion
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.layer1(out)
+        out = self.layer2(out)
+        out = self.layer3(out)
+        out = F.avg_pool2d(out, out.size()[3])
+        out = out.view(out.size(0), -1)
+        out = self.linear(out)
+        return out
+
+
 class CIFAR_ResNet(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10, bias=True):
         super(CIFAR_ResNet, self).__init__()
@@ -271,10 +351,12 @@ def resnet18(pretrained=False, **kwargs):
         model.load_state_dict(model_zoo.load_url(model_urls['resnet18']))
     return model
 
+def resnet32(**kwargs):
+    return ResNet_v2(BasicBlock_v2,[5,5,5],**kwargs)
 
-def my_resnet34(pretrained=False, **kwargs):
-    model = my_ResNet(BasicBlock, [3, 4, 6, 3, 3], **kwargs)
-    return model
+# def my_resnet34(pretrained=False, **kwargs):
+#     model = my_ResNet(BasicBlock, [3, 4, 6, 3, 3], **kwargs)
+#     return model
 
 def resnet34(pretrained=False, **kwargs):
     """Constructs a ResNet-34 model.
@@ -285,7 +367,6 @@ def resnet34(pretrained=False, **kwargs):
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet34']))
     return model
-
 
 def resnet50(pretrained=False, **kwargs):
     """Constructs a ResNet-50 model.
