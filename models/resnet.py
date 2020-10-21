@@ -254,7 +254,7 @@ class ResNet(nn.Module):
         return x
 
 class ResNet_v2(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10):
+    def __init__(self, block, num_blocks, num_classes=10,pretrained=False):
         super(ResNet_v2, self).__init__()
         self.in_planes = 16
 

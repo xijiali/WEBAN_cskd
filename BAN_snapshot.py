@@ -20,7 +20,6 @@ from datasets import load_dataset
 #added
 from tensorboardX import SummaryWriter
 from updater import BANUpdater
-
 #global variable
 best_val = 0  # best validation accuracy
 
@@ -30,9 +29,9 @@ def main():
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('--model', default="CIFAR_ResNet18", type=str,
                         help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='BAN_pretrain200', type=str, help='name of run')
+    parser.add_argument('--name', default='BAN1_from_pretrain200_snapshot', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
-    parser.add_argument('--epoch', default=50, type=int, help='total epochs to run')
+    parser.add_argument('--epoch', default=30, type=int, help='total epochs to run')
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
     parser.add_argument('--ngpu', default=2, type=int, help='number of gpu')
     parser.add_argument('--sgpu', default=0, type=int, help='gpu index (start)')
@@ -46,10 +45,10 @@ def main():
     # added
     parser.add_argument("--n_gen", type=int, default=5)
     parser.add_argument("--resume_gen", type=int, default=1)
-    parser.add_argument('--alpha', default=0.8, type=float, help='ce loss weight ratio')
+    parser.add_argument('--alpha', default=0, type=float, help='ce loss weight ratio')
     parser.add_argument('--evaluate', default=False, help='evaluate ensembling checkpoints')
     parser.add_argument('--testdir', default='./AWEBAN_results', type=str, help='save directory')
-    parser.add_argument('--cosine_annealing', default=False, help='cosine annealing')
+
 
 
 
@@ -77,6 +76,7 @@ def main():
     net = models.load_model(args.model, num_class)
     # print(net)
 
+
     if use_cuda:
         torch.cuda.set_device(args.sgpu)
         net.cuda()
@@ -88,15 +88,15 @@ def main():
         net = torch.nn.DataParallel(net, device_ids=device_ids)
 
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.decay)
-    # cosine annealing
-    if args.cosine_annealing:
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,T_max =args.epoch)
-
 
     logdir = os.path.join(args.saveroot, args.dataset, args.model, args.name)
     set_logging_defaults(logdir, args)
     logger = logging.getLogger('main')
     logname = os.path.join(logdir, 'log.csv')
+
+    if args.resume_gen == 1:
+        pretrained_weight=torch.load(os.path.join(logdir, "model0.pth.tar"))
+        net.load_state_dict(pretrained_weight)
 
     # Evaluate
     if args.evaluate:
@@ -170,13 +170,7 @@ def main():
             val_loss, val_acc = val(epoch, updater.model, valloader, use_cuda, criterion, optimizer, logdir,gen)
             writer.add_scalar("val_loss", val_loss, epoch)
 
-            if args.cosine_annealing:
-                # cosine annealing
-                scheduler.step()
-            else:
-                adjust_learning_rate(optimizer, epoch, args.lr, args.epoch)
-
-
+            adjust_learning_rate(optimizer, epoch, args.lr, args.epoch)
 
         last_model_weight=torch.load(os.path.join(logdir, "model"+str(gen)+".pth.tar"))
         updater.register_last_model(last_model_weight,device_ids)
@@ -186,10 +180,9 @@ def main():
         # initialize self (mode and optimizer)
         net = models.load_model(args.model, num_class).cuda()
         net = torch.nn.DataParallel(net, device_ids=device_ids)
+        # snapshot
+        net.load_state_dict(last_model_weight)
         optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.decay)
-        # cosine annealing
-        if args.cosine_annealing:
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
         updater.model = net
         updater.optimizer = optimizer
 

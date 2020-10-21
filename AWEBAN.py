@@ -15,11 +15,11 @@ import torchvision.transforms as transforms
 
 import models
 from utils import progress_bar, set_logging_defaults
-from datasets import load_dataset
+from datasets_aug import load_dataset
 
 #added
 from tensorboardX import SummaryWriter
-from updater import WEBANUpdater
+from updater import AWEBANUpdater
 from models.hypernetwork import HyperNetwork_FC
 #global variable
 best_val = 0  # best validation accuracy
@@ -30,9 +30,9 @@ def main():
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('--model', default="CIFAR_ResNet18", type=str,
                         help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='1_pretrain', type=str, help='name of run')
+    parser.add_argument('--name', default='AWEBAN_pretrain', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
-    parser.add_argument('--epoch', default=30, type=int, help='total epochs to run')#30
+    parser.add_argument('--epoch', default=50, type=int, help='total epochs to run')#30
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
     parser.add_argument('--ngpu', default=2, type=int, help='number of gpu')
     parser.add_argument('--sgpu', default=0, type=int, help='gpu index (start)')
@@ -151,7 +151,7 @@ def main():
         "alpha": args.alpha,
         "num_class": num_class,
     }
-    updater = WEBANUpdater(**kwargs)
+    updater = AWEBANUpdater(**kwargs)
 
     writer = SummaryWriter()
     best_loss_list = []
@@ -198,7 +198,7 @@ def main():
         updater.hypernetwork = hypernetwork
         updater.hypernetwork_optimizer = hypernetwork_optimizer
         # reload the dataloader
-        trainloader, valloader = load_dataset(args.dataset, args.dataroot, batch_size=args.batch_size)
+        #trainloader, valloader = load_dataset(args.dataset, args.dataroot, batch_size=args.batch_size)
 
     logger = logging.getLogger('best')
     for gen in range(len(best_loss_list)):
