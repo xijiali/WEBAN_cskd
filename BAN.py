@@ -165,6 +165,7 @@ def main():
             train_loss,train_kld_loss=updater.update(epoch,trainloader,criterion,kld_criterion)
             writer.add_scalar("train_loss", train_loss, epoch)
             writer.add_scalar("kld_loss", train_kld_loss, epoch)
+            writer.add_scalar("train_lr", optimizer.state_dict()['param_groups'][0]['lr'], epoch)
 
             # val_loss, val_acc = val(epoch)
             val_loss, val_acc = val(epoch, updater.model, valloader, use_cuda, criterion, optimizer, logdir,gen)

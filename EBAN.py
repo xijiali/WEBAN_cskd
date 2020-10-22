@@ -29,9 +29,9 @@ def main():
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('--model', default="CIFAR_ResNet18", type=str,
                         help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='EBAN_pretrain200', type=str, help='name of run')
+    parser.add_argument('--name', default='EBAN_weak', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
-    parser.add_argument('--epoch', default=50, type=int, help='total epochs to run')#30
+    parser.add_argument('--epoch', default=80, type=int, help='total epochs to run')#30
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
     parser.add_argument('--ngpu', default=2, type=int, help='number of gpu')
     parser.add_argument('--sgpu', default=0, type=int, help='gpu index (start)')
@@ -39,7 +39,7 @@ def main():
                         help='the name for dataset cifar100 | tinyimagenet | CUB200 | STANFORD120 | MIT67')
     parser.add_argument('--dataroot', default='/gruntdata4/xiaoxi.xjl/classification_datasets/', type=str,
                         help='data directory')
-    parser.add_argument('--saveroot', default='./test', type=str, help='save directory')
+    parser.add_argument('--saveroot', default='./EBAN_results', type=str, help='save directory')
     parser.add_argument('--temp', default=4.0, type=float, help='temperature scaling')
     parser.add_argument('--lamda', default=1.0, type=float, help='cls loss weight ratio')
     # added
@@ -48,9 +48,9 @@ def main():
     parser.add_argument('--alpha', default=0.8, type=float, help='ce loss weight ratio')
     parser.add_argument('--evaluate', default=False, help='evaluate ensembling checkpoints')
     parser.add_argument('--testdir', default='./EBAN_results', type=str, help='save directory')
-    parser.add_argument('--single_evaluate', default=True, help='evaluate single checkpoint')
+    parser.add_argument('--single_evaluate', default=False, help='evaluate single checkpoint')
     parser.add_argument('--single_evaluate_model_name', default='model3.pth.tar', type=str, help='single evaluate model name')
-    parser.add_argument('--cosine_annealing', default=False, help='cosine annealing')
+    parser.add_argument('--cosine_annealing', default=True, help='cosine annealing')
 
 
 
@@ -192,6 +192,7 @@ def main():
             train_loss, train_kld_loss = updater.update(epoch, trainloader, criterion, kld_criterion)
             writer.add_scalar("train_loss", train_loss, epoch)
             writer.add_scalar("kld_loss", train_kld_loss, epoch)
+            writer.add_scalar("train_lr", optimizer.state_dict()['param_groups'][0]['lr'], epoch)
 
             # val_loss, val_acc = val(epoch)
             val_loss, val_acc = val(epoch, updater.model, valloader, use_cuda, criterion, optimizer, logdir, gen)
