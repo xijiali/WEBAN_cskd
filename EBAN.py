@@ -50,6 +50,8 @@ def main():
     parser.add_argument('--testdir', default='./EBAN_results', type=str, help='save directory')
     parser.add_argument('--single_evaluate', default=True, help='evaluate single checkpoint')
     parser.add_argument('--single_evaluate_model_name', default='model3.pth.tar', type=str, help='single evaluate model name')
+    parser.add_argument('--cosine_annealing', default=False, help='cosine annealing')
+
 
 
 
@@ -88,6 +90,9 @@ def main():
         net = torch.nn.DataParallel(net, device_ids=device_ids)
 
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.decay)
+    # cosine annealing
+    if args.cosine_annealing:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
 
     logdir = os.path.join(args.saveroot, args.dataset, args.model, args.name)
     set_logging_defaults(logdir, args)
@@ -192,7 +197,11 @@ def main():
             val_loss, val_acc = val(epoch, updater.model, valloader, use_cuda, criterion, optimizer, logdir, gen)
             writer.add_scalar("val_loss", val_loss, epoch)
 
-            adjust_learning_rate(optimizer, epoch, args.lr, args.epoch)
+            if args.cosine_annealing:
+                # cosine annealing
+                scheduler.step()
+            else:
+                adjust_learning_rate(optimizer, epoch, args.lr, args.epoch)
 
         last_model_weight=torch.load(os.path.join(logdir, "model"+str(gen)+".pth.tar"))
         last_model_weight_lst.append(last_model_weight)
@@ -204,6 +213,9 @@ def main():
         net = models.load_model(args.model, num_class).cuda()
         net = torch.nn.DataParallel(net, device_ids=device_ids)
         optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.decay)
+        # cosine annealing
+        if args.cosine_annealing:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
         updater.model = net
         updater.optimizer = optimizer
 

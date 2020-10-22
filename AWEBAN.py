@@ -50,6 +50,8 @@ def main():
     parser.add_argument('--evaluate', default=False, help='evaluate ensembling checkpoints')
     parser.add_argument('--testdir', default='./AWEBAN_results', type=str, help='save directory')
     parser.add_argument("--hypernetwork_lr", type=float, default=0.001)
+    parser.add_argument('--cosine_annealing', default=False, help='cosine annealing')
+
 
 
     args = parser.parse_args()
@@ -93,8 +95,14 @@ def main():
         hypernetwork=torch.nn.DataParallel(hypernetwork, device_ids=device_ids)
 
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.decay)
+    # cosine annealing
+    if args.cosine_annealing:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
     #added
     hypernetwork_optimizer=optim.SGD(hypernetwork.parameters(), lr=args.hypernetwork_lr, momentum=0.9, weight_decay=args.decay)
+    # cosine annealing
+    if args.cosine_annealing:
+        hypernet_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(hypernetwork_optimizer, T_max=args.epoch)
 
     logdir = os.path.join(args.saveroot, args.dataset, args.model, args.name)
     set_logging_defaults(logdir, args)
@@ -178,7 +186,13 @@ def main():
             val_loss, val_acc = val(epoch, updater.model, valloader, use_cuda, criterion, optimizer, logdir, gen)
             writer.add_scalar("val_loss", val_loss, epoch)
 
-            adjust_learning_rate(optimizer, epoch, args.lr, args.epoch)
+            if args.cosine_annealing:
+                # cosine annealing
+                scheduler.step()
+                hypernet_scheduler.step()
+            else:
+                adjust_learning_rate(optimizer, epoch, args.lr, args.epoch)
+                adjust_learning_rate(hypernetwork_optimizer, epoch, args.lr, args.epoch)
 
         last_model_weight=torch.load(os.path.join(logdir, "model"+str(gen)+".pth.tar"))
         last_model_weight_lst.append(last_model_weight)
@@ -193,6 +207,10 @@ def main():
         hypernetwork = HyperNetwork_FC(updater.gen, num_class).cuda()
         hypernetwork=torch.nn.DataParallel(hypernetwork, device_ids=device_ids)
         hypernetwork_optimizer = optim.SGD(hypernetwork.parameters(), lr=args.hypernetwork_lr, momentum=0.9, weight_decay=1e-4)
+        # cosine annealing
+        if args.cosine_annealing:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
+            hypernet_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(hypernetwork_optimizer, T_max=args.epoch)
         updater.model = net
         updater.optimizer = optimizer
         updater.hypernetwork = hypernetwork
