@@ -30,9 +30,9 @@ def main():
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('--model', default="CIFAR_ResNet18", type=str,
                         help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='AWEBAN_pretrain', type=str, help='name of run')
+    parser.add_argument('--name', default='AWEBAN_weak', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
-    parser.add_argument('--epoch', default=50, type=int, help='total epochs to run')#30
+    parser.add_argument('--epoch', default=80, type=int, help='total epochs to run')#30
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
     parser.add_argument('--ngpu', default=2, type=int, help='number of gpu')
     parser.add_argument('--sgpu', default=0, type=int, help='gpu index (start)')
@@ -50,7 +50,7 @@ def main():
     parser.add_argument('--evaluate', default=False, help='evaluate ensembling checkpoints')
     parser.add_argument('--testdir', default='./AWEBAN_results', type=str, help='save directory')
     parser.add_argument("--hypernetwork_lr", type=float, default=0.001)
-    parser.add_argument('--cosine_annealing', default=False, help='cosine annealing')
+    parser.add_argument('--cosine_annealing', default=True, help='cosine annealing')
 
 
 
