@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.init as init
 
 
+
 def set_logging_defaults(logdir, args):
     if os.path.isdir(logdir):
         res = input('"{}" exists. Overwrite [Y/n]? '.format(logdir))

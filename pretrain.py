@@ -15,12 +15,13 @@ import torchvision.transforms as transforms
 
 import models
 from utils import progress_bar, set_logging_defaults
-from datasets_aug import load_dataset
+from datasets import load_dataset
 
 #added
 from tensorboardX import SummaryWriter
-from updater import AWEBANUpdater
-from models.hypernetwork import HyperNetwork_FC
+from updater import BANUpdater
+import numpy as np
+
 #global variable
 best_val = 0  # best validation accuracy
 
@@ -28,11 +29,11 @@ def main():
     parser = argparse.ArgumentParser(description='CS-KD Training')
     parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-    parser.add_argument('--model', default="resnet32", type=str,
-                        help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='AWEBAN_strong_resnet32', type=str, help='name of run')
+    parser.add_argument('--model', default="CIFAR_ResNet18", type=str,
+                        help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121,resnet32,WRN_28_1)')
+    parser.add_argument('--name', default='0', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
-    parser.add_argument('--epoch', default=200, type=int, help='total epochs to run')#30
+    parser.add_argument('--epoch', default=200, type=int, help='total epochs to run')
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
     parser.add_argument('--ngpu', default=2, type=int, help='number of gpu')
     parser.add_argument('--sgpu', default=0, type=int, help='gpu index (start)')
@@ -40,19 +41,17 @@ def main():
                         help='the name for dataset cifar100 | tinyimagenet | CUB200 | STANFORD120 | MIT67')
     parser.add_argument('--dataroot', default='/gruntdata4/xiaoxi.xjl/classification_datasets/', type=str,
                         help='data directory')
-    parser.add_argument('--saveroot', default='./AWEBAN_results', type=str, help='save directory')
+    parser.add_argument('--saveroot', default='./pretrain_results', type=str, help='save directory')
     parser.add_argument('--temp', default=4.0, type=float, help='temperature scaling')
     parser.add_argument('--lamda', default=1.0, type=float, help='cls loss weight ratio')
     # added
-    parser.add_argument("--n_gen", type=int, default=5)
-    parser.add_argument("--resume_gen", type=int, default=2)
+    parser.add_argument("--n_gen", type=int, default=1)
+    parser.add_argument("--resume_gen", type=int, default=0)
     parser.add_argument('--alpha', default=0.8, type=float, help='ce loss weight ratio')
     parser.add_argument('--evaluate', default=False, help='evaluate ensembling checkpoints')
     parser.add_argument('--testdir', default='./AWEBAN_results', type=str, help='save directory')
-    parser.add_argument("--hypernetwork_lr", type=float, default=0.001)
     parser.add_argument('--cosine_annealing', default=True, help='cosine annealing')
-
-
+    parser.add_argument("--save_step", type=int, default=50)
 
     args = parser.parse_args()
 
@@ -77,32 +76,24 @@ def main():
 
     net = models.load_model(args.model, num_class)
     # print(net)
-    #added
-    hypernetwork = HyperNetwork_FC(args.resume_gen, num_class)
+    print('flops {}'.format(np.sum([p.numel() for p in net.parameters()]).item()))
+
 
     if use_cuda:
         torch.cuda.set_device(args.sgpu)
         net.cuda()
         print(torch.cuda.device_count())
         print('Using CUDA..')
-        #added
-        hypernetwork.cuda()
 
     if args.ngpu > 1:
         device_ids=list(range(args.sgpu, args.sgpu + args.ngpu))
         net = torch.nn.DataParallel(net, device_ids=device_ids)
-        #added
-        hypernetwork=torch.nn.DataParallel(hypernetwork, device_ids=device_ids)
 
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.decay)
     # cosine annealing
     if args.cosine_annealing:
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
-    #added
-    hypernetwork_optimizer=optim.SGD(hypernetwork.parameters(), lr=args.hypernetwork_lr, momentum=0.9, weight_decay=args.decay)
-    # cosine annealing
-    if args.cosine_annealing:
-        hypernet_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(hypernetwork_optimizer, T_max=args.epoch)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,T_max =args.epoch)
+
 
     logdir = os.path.join(args.saveroot, args.dataset, args.model, args.name)
     set_logging_defaults(logdir, args)
@@ -144,6 +135,7 @@ def main():
         print('acc is {}'.format(acc))
         return
 
+
     criterion = nn.CrossEntropyLoss()
     kld_criterion=KDLoss(args.temp)
 
@@ -151,52 +143,44 @@ def main():
     # added
     kwargs = {
         "model": net,
-        "hypernetwork": hypernetwork,
         "optimizer": optimizer,
-        "hypernetwork_optimizer": hypernetwork_optimizer,
         "n_gen": args.n_gen,
         "model_name": args.model,
         "alpha": args.alpha,
         "num_class": num_class,
     }
-    updater = AWEBANUpdater(**kwargs)
+    updater = BANUpdater(**kwargs)
 
     writer = SummaryWriter()
     best_loss_list = []
-    last_model_weight_lst=[]
 
-    for gen in range(0,args.resume_gen):
-        pretrained_weight=torch.load(os.path.join(logdir, "model"+str(gen)+".pth.tar"))
-        last_model_weight_lst.append(pretrained_weight)
-
-    updater.gen = args.resume_gen
-    updater.register_last_model(last_model_weight_lst, device_ids)
+    if args.resume_gen>0:
+        pretrained_weight=torch.load(os.path.join(logdir, "model0.pth.tar"))
+        updater.gen = args.resume_gen
+        updater.register_last_model(pretrained_weight, device_ids)
 
     for gen in range(args.resume_gen, args.n_gen):
         print('\nGEN: %d' % gen)
         for epoch in range(start_epoch, args.epoch):
             # train_loss, train_acc, train_cls_loss = train(epoch)
-            # train_loss, train_acc, train_cls_loss = train(epoch, net, trainloader, use_cuda, criterion, optimizer)
-            train_loss, train_kld_loss,hypernetwok_ce_loss = updater.update(epoch, trainloader, criterion, kld_criterion)
+            #train_loss, train_acc, train_cls_loss = train(epoch, net, trainloader, use_cuda, criterion, optimizer)
+            train_loss,train_kld_loss=updater.update(epoch,trainloader,criterion,kld_criterion)
             writer.add_scalar("train_loss", train_loss, epoch)
             writer.add_scalar("kld_loss", train_kld_loss, epoch)
-            writer.add_scalar("hypernetwok_ce_loss", hypernetwok_ce_loss, epoch)
+            writer.add_scalar("train_lr", optimizer.state_dict()['param_groups'][0]['lr'], epoch)
 
             # val_loss, val_acc = val(epoch)
-            val_loss, val_acc = val(epoch, updater.model, valloader, use_cuda, criterion, optimizer, logdir, gen)
+            val_loss, val_acc = val(epoch, updater.model, valloader, use_cuda, criterion, optimizer, logdir,gen,args)
             writer.add_scalar("val_loss", val_loss, epoch)
 
             if args.cosine_annealing:
                 # cosine annealing
                 scheduler.step()
-                hypernet_scheduler.step()
             else:
                 adjust_learning_rate(optimizer, epoch, args.lr, args.epoch)
-                adjust_learning_rate(hypernetwork_optimizer, epoch, args.lr, args.epoch)
 
         last_model_weight=torch.load(os.path.join(logdir, "model"+str(gen)+".pth.tar"))
-        last_model_weight_lst.append(last_model_weight)
-        updater.register_last_model(last_model_weight_lst,device_ids)
+        updater.register_last_model(last_model_weight,device_ids)
         updater.gen += 1
         best_loss_list.append(best_val)
         best_val=0
@@ -204,23 +188,15 @@ def main():
         net = models.load_model(args.model, num_class).cuda()
         net = torch.nn.DataParallel(net, device_ids=device_ids)
         optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.decay)
-        hypernetwork = HyperNetwork_FC(updater.gen, num_class).cuda()
-        hypernetwork=torch.nn.DataParallel(hypernetwork, device_ids=device_ids)
-        hypernetwork_optimizer = optim.SGD(hypernetwork.parameters(), lr=args.hypernetwork_lr, momentum=0.9, weight_decay=1e-4)
         # cosine annealing
         if args.cosine_annealing:
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
-            hypernet_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(hypernetwork_optimizer, T_max=args.epoch)
         updater.model = net
         updater.optimizer = optimizer
-        updater.hypernetwork = hypernetwork
-        updater.hypernetwork_optimizer = hypernetwork_optimizer
-        # reload the dataloader
-        #trainloader, valloader = load_dataset(args.dataset, args.dataroot, batch_size=args.batch_size)
 
     logger = logging.getLogger('best')
-    for gen in range(len(best_loss_list)):
-        print("Gen: ", gen+args.resume_gen,
+    for gen in range(args.n_gen):
+        print("Gen: ", gen,
               ", best Accuracy: ", best_loss_list[gen])
         logger.info('[GEN {}] [Acc {:.3f}]'.format(gen,best_loss_list[gen]))
     # print("Best Accuracy : {}".format(best_val))
@@ -277,7 +253,7 @@ def train(epoch,net,trainloader,use_cuda,criterion,optimizer):
 
     return train_loss/len(trainloader), 100.*correct/total, train_cls_loss/len(trainloader)
 
-def val(epoch,net,valloader,use_cuda,criterion,optimizer,logdir,gen):
+def val(epoch,net,valloader,use_cuda,criterion,optimizer,logdir,gen,args):
     global best_val
     net.eval()
     val_loss = 0.0
@@ -315,6 +291,9 @@ def val(epoch,net,valloader,use_cuda,criterion,optimizer,logdir,gen):
         best_val = acc
         checkpoint(net,logdir,gen)
 
+    if ((epoch + 1) % args.save_step == 0 or (epoch == args.epoch - 1)):
+        checkpoint_snapshot(net,logdir,epoch)
+
     return (val_loss/(batch_idx+1), acc)
 
 
@@ -330,6 +309,17 @@ def checkpoint(net,logdir,gen):
     # }
     torch.save(net.state_dict(), os.path.join(logdir, "model"+str(gen)+".pth.tar"))
 
+def checkpoint_snapshot(net,logdir,epoch):
+    # Save checkpoint.
+    print('Saving..')
+    # state = {
+    #     'net': net.state_dict(),
+    #     'optimizer': optimizer.state_dict(),
+    #     'acc': acc,
+    #     'epoch': epoch,
+    #     'rng_state': torch.get_rng_state()
+    # }
+    torch.save(net.state_dict(), os.path.join(logdir, "snapshot"+str(epoch)+".pth.tar"))
 
 def adjust_learning_rate(optimizer, epoch,initial_lr,max_epoch):
     """decrease the learning rate at 100 and 150 epoch"""

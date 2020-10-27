@@ -2,9 +2,10 @@ import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 import torch.nn.functional as F
 import torch.nn.init as init
+from models.wide_resnet import Wide_ResNet
 
 __all__ = ['ResNet', 'resnet10', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
-           'resnet152', 'resnext50_32x4d', 'resnext101_32x8d', 'CIFAR_ResNet', 'CIFAR_ResNet18', 'CIFAR_ResNet34', 'CIFAR_ResNet10','resnet32']
+           'resnet152', 'resnext50_32x4d', 'resnext101_32x8d', 'CIFAR_ResNet', 'CIFAR_ResNet18', 'CIFAR_ResNet34', 'CIFAR_ResNet10','resnet32','WRN_28_1']
 
 
 model_urls = {
@@ -357,6 +358,10 @@ def resnet32(**kwargs):
 # def my_resnet34(pretrained=False, **kwargs):
 #     model = my_ResNet(BasicBlock, [3, 4, 6, 3, 3], **kwargs)
 #     return model
+
+def WRN_28_1(**kwargs):
+    return Wide_ResNet(depth=28, widen_factor=1, dropout_rate=0.3, **kwargs)
+
 
 def resnet34(pretrained=False, **kwargs):
     """Constructs a ResNet-34 model.

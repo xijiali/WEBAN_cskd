@@ -20,6 +20,7 @@ from datasets import load_dataset
 #added
 from tensorboardX import SummaryWriter
 from updater import BANUpdater
+import numpy as np
 
 #global variable
 best_val = 0  # best validation accuracy
@@ -28,11 +29,11 @@ def main():
     parser = argparse.ArgumentParser(description='CS-KD Training')
     parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-    parser.add_argument('--model', default="CIFAR_ResNet18", type=str,
-                        help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='BAN_weak', type=str, help='name of run')
+    parser.add_argument('--model', default="resnet32", type=str,
+                        help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121,resnet32,WRN_28_1)')
+    parser.add_argument('--name', default='BAN_strong_resnet32', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
-    parser.add_argument('--epoch', default=80, type=int, help='total epochs to run')
+    parser.add_argument('--epoch', default=200, type=int, help='total epochs to run')
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
     parser.add_argument('--ngpu', default=2, type=int, help='number of gpu')
     parser.add_argument('--sgpu', default=0, type=int, help='gpu index (start)')
@@ -49,7 +50,7 @@ def main():
     parser.add_argument('--alpha', default=0.8, type=float, help='ce loss weight ratio')
     parser.add_argument('--evaluate', default=False, help='evaluate ensembling checkpoints')
     parser.add_argument('--testdir', default='./AWEBAN_results', type=str, help='save directory')
-    parser.add_argument('--cosine_annealing', default=False, help='cosine annealing')
+    parser.add_argument('--cosine_annealing', default=True, help='cosine annealing')
 
 
 
@@ -76,6 +77,8 @@ def main():
 
     net = models.load_model(args.model, num_class)
     # print(net)
+    print('flops {}'.format(np.sum([p.numel() for p in net.parameters()]).item()))
+
 
     if use_cuda:
         torch.cuda.set_device(args.sgpu)
