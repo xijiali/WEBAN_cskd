@@ -19,7 +19,9 @@ from datasets import load_dataset
 
 #added
 from tensorboardX import SummaryWriter
-from updater import EBANUpdater
+from updater import BANUpdater
+import numpy as np
+
 #global variable
 best_val = 0  # best validation accuracy
 
@@ -27,11 +29,11 @@ def main():
     parser = argparse.ArgumentParser(description='CS-KD Training')
     parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-    parser.add_argument('--model', default="WRN_28_1", type=str,
-                        help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='BAN_structure', type=str, help='name of run')
+    parser.add_argument('--model', default="CIFAR_ResNet18", type=str,
+                        help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121,resnet32,WRN_28_1)')
+    parser.add_argument('--name', default='BAN_keep_second', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
-    parser.add_argument('--epoch', default=200, type=int, help='total epochs to run')#30
+    parser.add_argument('--epoch', default=200, type=int, help='total epochs to run')
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
     parser.add_argument('--ngpu', default=2, type=int, help='number of gpu')
     parser.add_argument('--sgpu', default=0, type=int, help='gpu index (start)')
@@ -39,19 +41,16 @@ def main():
                         help='the name for dataset cifar100 | tinyimagenet | CUB200 | STANFORD120 | MIT67')
     parser.add_argument('--dataroot', default='/gruntdata4/xiaoxi.xjl/classification_datasets/', type=str,
                         help='data directory')
-    parser.add_argument('--saveroot', default='./test', type=str, help='save directory')
+    parser.add_argument('--saveroot', default='./BAN_explore', type=str, help='save directory')
     parser.add_argument('--temp', default=4.0, type=float, help='temperature scaling')
     parser.add_argument('--lamda', default=1.0, type=float, help='cls loss weight ratio')
     # added
-    parser.add_argument("--n_gen", type=int, default=3)
-    parser.add_argument("--resume_gen", type=int, default=2)
+    parser.add_argument("--n_gen", type=int, default=2)
+    parser.add_argument("--resume_gen", type=int, default=1)
     parser.add_argument('--alpha', default=0.8, type=float, help='ce loss weight ratio')
     parser.add_argument('--evaluate', default=False, help='evaluate ensembling checkpoints')
-    parser.add_argument('--testdir', default='./BAN_results', type=str, help='save directory')
-    parser.add_argument('--single_evaluate', default=True, help='evaluate single checkpoint')
-    parser.add_argument('--single_evaluate_model_name', default='model2.pth.tar', type=str, help='single evaluate model name')
+    parser.add_argument('--testdir', default='./control_experiment', type=str, help='save directory')
     parser.add_argument('--cosine_annealing', default=True, help='cosine annealing')
-
 
 
 
@@ -78,6 +77,8 @@ def main():
 
     net = models.load_model(args.model, num_class)
     # print(net)
+    print('flops {}'.format(np.sum([p.numel() for p in net.parameters()]).item()))
+
 
     if use_cuda:
         torch.cuda.set_device(args.sgpu)
@@ -92,14 +93,15 @@ def main():
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.decay)
     # cosine annealing
     if args.cosine_annealing:
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,T_max =args.epoch)
+
 
     logdir = os.path.join(args.saveroot, args.dataset, args.model, args.name)
     set_logging_defaults(logdir, args)
     logger = logging.getLogger('main')
     logname = os.path.join(logdir, 'log.csv')
 
-    # Resume
+    # Evaluate
     if args.evaluate:
         testdir = os.path.join(args.testdir, args.dataset, args.model, args.name)
         # Load checkpoint.
@@ -134,34 +136,9 @@ def main():
         print('acc is {}'.format(acc))
         return
 
-    if args.single_evaluate:
-        net.eval()
-        #testdir = os.path.join(args.testdir, args.dataset, args.model, args.name)
-        testdir = os.path.join(args.testdir, args.dataset, 'CIFAR_ResNet18', args.name)
-        print('==> Evaluating single checkpoint..')
-        print('testdir is : {}'.format(testdir))
-        model_name = args.single_evaluate_model_name
-        checkpoint = torch.load(os.path.join(testdir, model_name))
-        net.load_state_dict(checkpoint)
-        correct = 0.0
-        total = 0.0
-        with torch.no_grad():
-            for batch_idx, (inputs, targets) in enumerate(valloader):
-                inputs, targets = inputs.cuda(), targets.cuda()
-                outputs=net(inputs)
-                _, predicted = torch.max(outputs, 1)
-                total += targets.size(0)
-                correct += predicted.eq(targets.data).cpu().sum().float()
-            acc = 100. * correct / total
-            print('acc is {}'.format(acc))
-        return
-
-
-
-
 
     criterion = nn.CrossEntropyLoss()
-    kld_criterion=KDLoss(args.temp)
+    kld_criterion=KDLoss_keep_second(args.temp)
 
     # Logs
     # added
@@ -173,33 +150,28 @@ def main():
         "alpha": args.alpha,
         "num_class": num_class,
     }
-    updater = EBANUpdater(**kwargs)
+    updater = BANUpdater(**kwargs)
 
     writer = SummaryWriter()
     best_loss_list = []
-    last_model_weight_lst=[]
 
-    for gen in range(0,args.resume_gen):
-        pretrained_weight=torch.load(os.path.join(logdir, "model"+str(gen)+".pth.tar"))
-        last_model_weight_lst.append(pretrained_weight)
-
-    updater.gen = args.resume_gen
-    updater.register_last_model(last_model_weight_lst, device_ids)
-
-    delta_T=0
+    if args.resume_gen>0:
+        pretrained_weight=torch.load(os.path.join(logdir, "model0.pth.tar"))
+        updater.gen = args.resume_gen
+        updater.register_last_model(pretrained_weight, device_ids)
 
     for gen in range(args.resume_gen, args.n_gen):
         print('\nGEN: %d' % gen)
         for epoch in range(start_epoch, args.epoch):
             # train_loss, train_acc, train_cls_loss = train(epoch)
-            # train_loss, train_acc, train_cls_loss = train(epoch, net, trainloader, use_cuda, criterion, optimizer)
-            train_loss, train_kld_loss = updater.update(epoch, trainloader, criterion, kld_criterion)
+            #train_loss, train_acc, train_cls_loss = train(epoch, net, trainloader, use_cuda, criterion, optimizer)
+            train_loss,train_kld_loss=updater.update(epoch,trainloader,criterion,kld_criterion)
             writer.add_scalar("train_loss", train_loss, epoch)
             writer.add_scalar("kld_loss", train_kld_loss, epoch)
             writer.add_scalar("train_lr", optimizer.state_dict()['param_groups'][0]['lr'], epoch)
 
             # val_loss, val_acc = val(epoch)
-            val_loss, val_acc = val(epoch, updater.model, valloader, use_cuda, criterion, optimizer, logdir, gen)
+            val_loss, val_acc = val(epoch, updater.model, valloader, use_cuda, criterion, optimizer, logdir,gen)
             writer.add_scalar("val_loss", val_loss, epoch)
 
             if args.cosine_annealing:
@@ -208,9 +180,10 @@ def main():
             else:
                 adjust_learning_rate(optimizer, epoch, args.lr, args.epoch)
 
+
+
         last_model_weight=torch.load(os.path.join(logdir, "model"+str(gen)+".pth.tar"))
-        last_model_weight_lst.append(last_model_weight)
-        updater.register_last_model(last_model_weight_lst,device_ids)
+        updater.register_last_model(last_model_weight,device_ids)
         updater.gen += 1
         best_loss_list.append(best_val)
         best_val=0
@@ -225,8 +198,8 @@ def main():
         updater.optimizer = optimizer
 
     logger = logging.getLogger('best')
-    for gen in range(len(best_loss_list)):
-        print("Gen: ", gen+args.resume_gen,
+    for gen in range(args.n_gen):
+        print("Gen: ", gen,
               ", best Accuracy: ", best_loss_list[gen])
         logger.info('[GEN {}] [Acc {:.3f}]'.format(gen,best_loss_list[gen]))
     # print("Best Accuracy : {}".format(best_val))
@@ -247,6 +220,60 @@ class KDLoss(nn.Module):
         q = torch.softmax(target/self.temp_factor, dim=1)
         loss = self.kl_div(log_p, q)*(self.temp_factor**2)/input.size(0)
         return loss
+
+class KDLoss_keep_second(nn.Module):
+    def __init__(self, temp_factor):
+        super(KDLoss_keep_second, self).__init__()
+        self.temp_factor = temp_factor
+        self.kl_div = nn.KLDivLoss(reduction="sum")
+
+    def forward(self, input, target):
+        log_p = torch.log_softmax(input/self.temp_factor, dim=1)
+        # permute target
+        _, indices_target = torch.sort(target, descending=True)
+        top_indices=indices_target[:,0:2]#[64,2]
+        rest_indices=indices_target[:,2:]#[64,99]
+        rest_indices=rest_indices.cpu().numpy()
+        permuted_rest_indices=np.random.permutation(np.transpose(rest_indices))
+        permuted_rest_indices=np.transpose(permuted_rest_indices)
+        permuted_rest_indices=torch.from_numpy(permuted_rest_indices).cuda()
+        new_target=torch.zeros(target.size()).cuda()
+        for i in range(target.size(0)):
+            origin_index = rest_indices[i, :]
+            new_index = permuted_rest_indices[i, :]
+            new_target[i, origin_index] = target[i, new_index]
+            new_target[i,top_indices[i]]=target[i,top_indices[i]]
+        q = torch.softmax(new_target/self.temp_factor, dim=1)
+        loss = self.kl_div(log_p, q)*(self.temp_factor**2)/input.size(0)
+        return loss
+
+
+class KDLoss_random_permute(nn.Module):
+    def __init__(self, temp_factor):
+        super(KDLoss_random_permute, self).__init__()
+        self.temp_factor = temp_factor
+        self.kl_div = nn.KLDivLoss(reduction="sum")
+
+    def forward(self, input, target):
+        log_p = torch.log_softmax(input/self.temp_factor, dim=1)
+        # permute target
+        _, indices_target = torch.sort(target, descending=True)
+        top_indices=indices_target[:,0]#[64]
+        rest_indices=indices_target[:,1:]#[64,99]
+        rest_indices=rest_indices.cpu().numpy()
+        permuted_rest_indices=np.random.permutation(np.transpose(rest_indices))
+        permuted_rest_indices=np.transpose(permuted_rest_indices)
+        permuted_rest_indices=torch.from_numpy(permuted_rest_indices).cuda()
+        new_target=torch.zeros(target.size()).cuda()
+        for i in range(target.size(0)):
+            origin_index = rest_indices[i, :]
+            new_index = permuted_rest_indices[i, :]
+            new_target[i, origin_index] = target[i, new_index]
+            new_target[i,top_indices[i]]=target[i,top_indices[i]]
+        q = torch.softmax(new_target/self.temp_factor, dim=1)
+        loss = self.kl_div(log_p, q)*(self.temp_factor**2)/input.size(0)
+        return loss
+
 
 def train(epoch,net,trainloader,use_cuda,criterion,optimizer):
     print('\nEpoch: %d' % epoch)

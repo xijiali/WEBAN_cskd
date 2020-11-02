@@ -19,7 +19,8 @@ from datasets import load_dataset
 
 #added
 from tensorboardX import SummaryWriter
-from updater import EBANUpdater
+from updater import WEBANUpdater
+from models.hypernetwork import HyperNetwork_FC
 #global variable
 best_val = 0  # best validation accuracy
 
@@ -27,9 +28,9 @@ def main():
     parser = argparse.ArgumentParser(description='CS-KD Training')
     parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-    parser.add_argument('--model', default="WRN_28_1", type=str,
+    parser.add_argument('--model', default="CIFAR_ResNet18", type=str,
                         help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='BAN_structure', type=str, help='name of run')
+    parser.add_argument('--name', default='2_teachers_WEBAN', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
     parser.add_argument('--epoch', default=200, type=int, help='total epochs to run')#30
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
@@ -39,7 +40,7 @@ def main():
                         help='the name for dataset cifar100 | tinyimagenet | CUB200 | STANFORD120 | MIT67')
     parser.add_argument('--dataroot', default='/gruntdata4/xiaoxi.xjl/classification_datasets/', type=str,
                         help='data directory')
-    parser.add_argument('--saveroot', default='./test', type=str, help='save directory')
+    parser.add_argument('--saveroot', default='./control_experiment', type=str, help='save directory')
     parser.add_argument('--temp', default=4.0, type=float, help='temperature scaling')
     parser.add_argument('--lamda', default=1.0, type=float, help='cls loss weight ratio')
     # added
@@ -47,11 +48,9 @@ def main():
     parser.add_argument("--resume_gen", type=int, default=2)
     parser.add_argument('--alpha', default=0.8, type=float, help='ce loss weight ratio')
     parser.add_argument('--evaluate', default=False, help='evaluate ensembling checkpoints')
-    parser.add_argument('--testdir', default='./BAN_results', type=str, help='save directory')
-    parser.add_argument('--single_evaluate', default=True, help='evaluate single checkpoint')
-    parser.add_argument('--single_evaluate_model_name', default='model2.pth.tar', type=str, help='single evaluate model name')
+    parser.add_argument('--testdir', default='./WEBAN_results', type=str, help='save directory')
+    parser.add_argument("--hypernetwork_lr", type=float, default=0.001)
     parser.add_argument('--cosine_annealing', default=True, help='cosine annealing')
-
 
 
 
@@ -78,28 +77,39 @@ def main():
 
     net = models.load_model(args.model, num_class)
     # print(net)
+    #added
+    hypernetwork = HyperNetwork_FC(args.resume_gen, num_class)
 
     if use_cuda:
         torch.cuda.set_device(args.sgpu)
         net.cuda()
         print(torch.cuda.device_count())
         print('Using CUDA..')
+        #added
+        hypernetwork.cuda()
 
     if args.ngpu > 1:
         device_ids=list(range(args.sgpu, args.sgpu + args.ngpu))
         net = torch.nn.DataParallel(net, device_ids=device_ids)
+        #added
+        hypernetwork=torch.nn.DataParallel(hypernetwork, device_ids=device_ids)
 
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.decay)
     # cosine annealing
     if args.cosine_annealing:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
+    #added
+    hypernetwork_optimizer=optim.SGD(hypernetwork.parameters(), lr=args.hypernetwork_lr, momentum=0.9, weight_decay=args.decay)
+    # cosine annealing
+    if args.cosine_annealing:
+        hypernet_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(hypernetwork_optimizer, T_max=args.epoch)
 
     logdir = os.path.join(args.saveroot, args.dataset, args.model, args.name)
     set_logging_defaults(logdir, args)
     logger = logging.getLogger('main')
     logname = os.path.join(logdir, 'log.csv')
 
-    # Resume
+    # Evaluate
     if args.evaluate:
         testdir = os.path.join(args.testdir, args.dataset, args.model, args.name)
         # Load checkpoint.
@@ -107,7 +117,6 @@ def main():
         model_lst = []
         for i in range(args.n_gen):
             temp_model = models.load_model(args.model, num_class).cuda()
-            temp_model.eval()
             temp_model= torch.nn.DataParallel(temp_model, device_ids=device_ids)
             model_name = 'model' + str(i) + '.pth.tar'
             checkpoint = torch.load(os.path.join(testdir, model_name))
@@ -134,32 +143,6 @@ def main():
         print('acc is {}'.format(acc))
         return
 
-    if args.single_evaluate:
-        net.eval()
-        #testdir = os.path.join(args.testdir, args.dataset, args.model, args.name)
-        testdir = os.path.join(args.testdir, args.dataset, 'CIFAR_ResNet18', args.name)
-        print('==> Evaluating single checkpoint..')
-        print('testdir is : {}'.format(testdir))
-        model_name = args.single_evaluate_model_name
-        checkpoint = torch.load(os.path.join(testdir, model_name))
-        net.load_state_dict(checkpoint)
-        correct = 0.0
-        total = 0.0
-        with torch.no_grad():
-            for batch_idx, (inputs, targets) in enumerate(valloader):
-                inputs, targets = inputs.cuda(), targets.cuda()
-                outputs=net(inputs)
-                _, predicted = torch.max(outputs, 1)
-                total += targets.size(0)
-                correct += predicted.eq(targets.data).cpu().sum().float()
-            acc = 100. * correct / total
-            print('acc is {}'.format(acc))
-        return
-
-
-
-
-
     criterion = nn.CrossEntropyLoss()
     kld_criterion=KDLoss(args.temp)
 
@@ -167,13 +150,15 @@ def main():
     # added
     kwargs = {
         "model": net,
+        "hypernetwork": hypernetwork,
         "optimizer": optimizer,
+        "hypernetwork_optimizer": hypernetwork_optimizer,
         "n_gen": args.n_gen,
         "model_name": args.model,
         "alpha": args.alpha,
         "num_class": num_class,
     }
-    updater = EBANUpdater(**kwargs)
+    updater = WEBANUpdater(**kwargs)
 
     writer = SummaryWriter()
     best_loss_list = []
@@ -186,17 +171,15 @@ def main():
     updater.gen = args.resume_gen
     updater.register_last_model(last_model_weight_lst, device_ids)
 
-    delta_T=0
-
     for gen in range(args.resume_gen, args.n_gen):
         print('\nGEN: %d' % gen)
         for epoch in range(start_epoch, args.epoch):
             # train_loss, train_acc, train_cls_loss = train(epoch)
             # train_loss, train_acc, train_cls_loss = train(epoch, net, trainloader, use_cuda, criterion, optimizer)
-            train_loss, train_kld_loss = updater.update(epoch, trainloader, criterion, kld_criterion)
+            train_loss, train_kld_loss,hypernetwok_ce_loss = updater.update(epoch, trainloader, criterion, kld_criterion)
             writer.add_scalar("train_loss", train_loss, epoch)
             writer.add_scalar("kld_loss", train_kld_loss, epoch)
-            writer.add_scalar("train_lr", optimizer.state_dict()['param_groups'][0]['lr'], epoch)
+            writer.add_scalar("hypernetwok_ce_loss", hypernetwok_ce_loss, epoch)
 
             # val_loss, val_acc = val(epoch)
             val_loss, val_acc = val(epoch, updater.model, valloader, use_cuda, criterion, optimizer, logdir, gen)
@@ -205,8 +188,10 @@ def main():
             if args.cosine_annealing:
                 # cosine annealing
                 scheduler.step()
+                hypernet_scheduler.step()
             else:
                 adjust_learning_rate(optimizer, epoch, args.lr, args.epoch)
+                adjust_learning_rate(hypernetwork_optimizer, epoch, args.lr, args.epoch)
 
         last_model_weight=torch.load(os.path.join(logdir, "model"+str(gen)+".pth.tar"))
         last_model_weight_lst.append(last_model_weight)
@@ -218,11 +203,17 @@ def main():
         net = models.load_model(args.model, num_class).cuda()
         net = torch.nn.DataParallel(net, device_ids=device_ids)
         optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.decay)
+        hypernetwork = HyperNetwork_FC(updater.gen, num_class).cuda()
+        hypernetwork=torch.nn.DataParallel(hypernetwork, device_ids=device_ids)
+        hypernetwork_optimizer = optim.SGD(hypernetwork.parameters(), lr=args.hypernetwork_lr, momentum=0.9, weight_decay=1e-4)
         # cosine annealing
         if args.cosine_annealing:
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
+            hypernet_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(hypernetwork_optimizer, T_max=args.epoch)
         updater.model = net
         updater.optimizer = optimizer
+        updater.hypernetwork = hypernetwork
+        updater.hypernetwork_optimizer = hypernetwork_optimizer
 
     logger = logging.getLogger('best')
     for gen in range(len(best_loss_list)):

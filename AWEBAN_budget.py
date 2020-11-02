@@ -28,9 +28,9 @@ def main():
     parser = argparse.ArgumentParser(description='CS-KD Training')
     parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-    parser.add_argument('--model', default="resnet32", type=str,
+    parser.add_argument('--model', default="CIFAR_ResNet18", type=str,
                         help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='AWEBAN_strong_budget', type=str, help='name of run')
+    parser.add_argument('--name', default='AWEBAN_budget_50_150', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
     parser.add_argument('--epoch', default=150, type=int, help='total epochs to run')#30
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
@@ -45,12 +45,14 @@ def main():
     parser.add_argument('--lamda', default=1.0, type=float, help='cls loss weight ratio')
     # added
     parser.add_argument("--n_gen", type=int, default=5)
-    parser.add_argument("--resume_gen", type=int, default=2)
+    parser.add_argument("--resume_gen", type=int, default=1)
     parser.add_argument('--alpha', default=0.8, type=float, help='ce loss weight ratio')
     parser.add_argument('--evaluate', default=False, help='evaluate ensembling checkpoints')
     parser.add_argument('--testdir', default='./AWEBAN_results', type=str, help='save directory')
     parser.add_argument("--hypernetwork_lr", type=float, default=0.001)
     parser.add_argument('--cosine_annealing', default=True, help='cosine annealing')
+    parser.add_argument('--snapshot_dir', default='', type=str, help='save directory')
+
 
 
 
@@ -108,6 +110,10 @@ def main():
     set_logging_defaults(logdir, args)
     logger = logging.getLogger('main')
     logname = os.path.join(logdir, 'log.csv')
+
+    if args.resume_gen > 0:
+        pretrained_weight=torch.load(args.snapshot_dir)
+        net.load_state_dict(pretrained_weight)
 
     # Evaluate
     if args.evaluate:
@@ -203,6 +209,9 @@ def main():
         # initialize self (mode and optimizer)
         net = models.load_model(args.model, num_class).cuda()
         net = torch.nn.DataParallel(net, device_ids=device_ids)
+        # snapshot
+        if args.resume_gen>0:
+            net.load_state_dict(pretrained_weight)
         optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.decay)
         hypernetwork = HyperNetwork_FC(updater.gen, num_class).cuda()
         hypernetwork=torch.nn.DataParallel(hypernetwork, device_ids=device_ids)

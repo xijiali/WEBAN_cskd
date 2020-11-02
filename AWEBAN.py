@@ -30,7 +30,7 @@ def main():
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('--model', default="resnet32", type=str,
                         help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='AWEBAN_strong_resnet32', type=str, help='name of run')
+    parser.add_argument('--name', default='AWEBAN_strong_resnet32_run2', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
     parser.add_argument('--epoch', default=200, type=int, help='total epochs to run')#30
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
@@ -189,10 +189,10 @@ def main():
             if args.cosine_annealing:
                 # cosine annealing
                 scheduler.step()
-                hypernet_scheduler.step()
+                #hypernet_scheduler.step()
             else:
                 adjust_learning_rate(optimizer, epoch, args.lr, args.epoch)
-                adjust_learning_rate(hypernetwork_optimizer, epoch, args.lr, args.epoch)
+                #adjust_learning_rate(hypernetwork_optimizer, epoch, args.lr, args.epoch)
 
         last_model_weight=torch.load(os.path.join(logdir, "model"+str(gen)+".pth.tar"))
         last_model_weight_lst.append(last_model_weight)

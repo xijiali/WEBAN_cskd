@@ -27,9 +27,9 @@ def main():
     parser = argparse.ArgumentParser(description='CS-KD Training')
     parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-    parser.add_argument('--model', default="WRN_28_1", type=str,
+    parser.add_argument('--model', default="CIFAR_ResNet18", type=str,
                         help='model type (32x32: CIFAR_ResNet18, CIFAR_DenseNet121, 224x224: resnet18, densenet121)')
-    parser.add_argument('--name', default='BAN_structure', type=str, help='name of run')
+    parser.add_argument('--name', default='2_teachers', type=str, help='name of run')
     parser.add_argument('--batch-size', default=128, type=int, help='batch size')
     parser.add_argument('--epoch', default=200, type=int, help='total epochs to run')#30
     parser.add_argument('--decay', default=1e-4, type=float, help='weight decay')
@@ -39,7 +39,7 @@ def main():
                         help='the name for dataset cifar100 | tinyimagenet | CUB200 | STANFORD120 | MIT67')
     parser.add_argument('--dataroot', default='/gruntdata4/xiaoxi.xjl/classification_datasets/', type=str,
                         help='data directory')
-    parser.add_argument('--saveroot', default='./test', type=str, help='save directory')
+    parser.add_argument('--saveroot', default='./control_experiment', type=str, help='save directory')
     parser.add_argument('--temp', default=4.0, type=float, help='temperature scaling')
     parser.add_argument('--lamda', default=1.0, type=float, help='cls loss weight ratio')
     # added
@@ -47,9 +47,9 @@ def main():
     parser.add_argument("--resume_gen", type=int, default=2)
     parser.add_argument('--alpha', default=0.8, type=float, help='ce loss weight ratio')
     parser.add_argument('--evaluate', default=False, help='evaluate ensembling checkpoints')
-    parser.add_argument('--testdir', default='./BAN_results', type=str, help='save directory')
-    parser.add_argument('--single_evaluate', default=True, help='evaluate single checkpoint')
-    parser.add_argument('--single_evaluate_model_name', default='model2.pth.tar', type=str, help='single evaluate model name')
+    parser.add_argument('--testdir', default='./AWEBAN_results', type=str, help='save directory')
+    parser.add_argument('--single_evaluate', default=False, help='evaluate single checkpoint')
+    parser.add_argument('--single_evaluate_model_name', default='model3.pth.tar', type=str, help='single evaluate model name')
     parser.add_argument('--cosine_annealing', default=True, help='cosine annealing')
 
 
@@ -136,8 +136,7 @@ def main():
 
     if args.single_evaluate:
         net.eval()
-        #testdir = os.path.join(args.testdir, args.dataset, args.model, args.name)
-        testdir = os.path.join(args.testdir, args.dataset, 'CIFAR_ResNet18', args.name)
+        testdir = os.path.join(args.testdir, args.dataset, args.model, args.name)
         print('==> Evaluating single checkpoint..')
         print('testdir is : {}'.format(testdir))
         model_name = args.single_evaluate_model_name
